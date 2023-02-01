@@ -269,7 +269,7 @@ int MAX_Yobj_Import::DoImport(const TCHAR* fileName, ImpInterface* /*importerInt
 		rootNode->AttachChild(node, 1);
 
 		//set Skin  - this is pretty slow, this could be optimized
-		//if (mObj.isSkinned) { setMeshSkin(node, model, mObj); }
+		if (mObj.isSkinned) { setMeshSkin(node, model, mObj); }
 
 		//set Material
 		setMaterial(mObj, node, sceneMaterials, sceneMatNames);
@@ -705,10 +705,10 @@ void MAX_Yobj_Import::setMeshSkin(INode* node, YOBJReader& model, YukesSubObj& m
 			Tab<INode*> wBones;
 			Tab<float> weights;
 
-			for (int j = 0; j < 4; j++)
+			for (int j = 0; j < mObj.weightInfluence; j++)
 			{
-				int boneIndex = bi[(i * 4) + j];
-				float boneWeight = bw[(i * 4) + j];
+				int boneIndex = bi[(i * mObj.weightInfluence) + j];
+				float boneWeight = bw[(i * mObj.weightInfluence) + j];
 				MDLBoneOBJ bone = model.bones[boneIndex];
 
 				INode* boneRef = GetCOREInterface()->GetINodeByName(BinaryUtils::string_to_wchar(bone.name));
