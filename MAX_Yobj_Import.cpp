@@ -58,6 +58,7 @@ public:
 	void setNormals(Mesh& mesh, YukesSubObj& model);
 	void setMaps(Mesh& mesh, YukesSubObj& mObj);
 	void setMaterial(YukesSubObj& model, INode* node, std::vector<StdMat2*>* sceneMaterials, std::vector<string>* matNames);
+	void setMeshSkin(INode* node, YOBJReader& model, YukesSubObj& mObj);
 };
 
 
@@ -236,8 +237,8 @@ int MAX_Yobj_Import::DoImport(const TCHAR* fileName, ImpInterface* /*importerInt
 	for (int i = 0; i < model.getModelCount(); i++) {
 
 		YukesSubObj mObj = model.subModels[i];
-		const wchar_t* modelName = BinaryUtils::string_to_wchar(mObj.name);
-		const wchar_t* meshName = BinaryUtils::string_to_wchar(mObj.meshName);
+		const wchar_t* modelName = BinaryUtils::string_to_wchar(mObj.meshName);
+		const wchar_t* meshName = BinaryUtils::string_to_wchar(mObj.name);
 
 		//debug print models
 		the_listener->edit_stream->printf(L"Mesh: %s\nVertices: %d\nTriangles: %d\n",
@@ -474,9 +475,9 @@ void MAX_Yobj_Import::setNormals(Mesh& mesh, YukesSubObj& model) {
 		std::vector<float> mnorms = model.getNormals();
 		for (int j = 0; j < model.verticeCount; j++) {
 			Point3 vertPos;
-			vertPos.x = mnorms[0 + (j * bufType)];
-			vertPos.y = mnorms[1 + (j * bufType)];
-			vertPos.z = mnorms[2 + (j * bufType)];
+			vertPos.x = -1 * mnorms[0 + (j * bufType)];
+			vertPos.y = -1 * mnorms[1 + (j * bufType)];
+			vertPos.z = -1 * mnorms[2 + (j * bufType)];
 
 			norms[j] = (vertPos);
 		}
@@ -588,4 +589,140 @@ void MAX_Yobj_Import::setMaterial(YukesSubObj& model, INode* node,
 
 }
 
+
+// Locate a TriObject in an Object if it exists
+TriObject* GetTriObject(Object* o)
+{
+	if (o && o->CanConvertToType(triObjectClassID))
+		return (TriObject*)o->ConvertToType(0, triObjectClassID);
+	while (o->SuperClassID() == GEN_DERIVOB_CLASS_ID && o)
+	{
+		IDerivedObject* dobj = (IDerivedObject*)(o);
+		o = dobj->GetObjRef();
+		if (o && o->CanConvertToType(triObjectClassID))
+			return (TriObject*)o->ConvertToType(0, triObjectClassID);
+	}
+	return nullptr;
+}
+
+Modifier* GetSkin(INode* node)
+{
+	Object* pObj = node->GetObjectRef();
+	if (!pObj) return nullptr;
+	while (pObj->SuperClassID() == GEN_DERIVOB_CLASS_ID)
+	{
+		IDerivedObject* pDerObj = (IDerivedObject*)(pObj);
+		int Idx = 0;
+		while (Idx < pDerObj->NumModifiers())
+		{
+			// Get the modifier. 
+			Modifier* mod = pDerObj->GetModifier(Idx);
+			if (mod->ClassID() == SKIN_CLASSID)
+			{
+				// is this the correct Physique Modifier based on index?
+				return mod;
+			}
+			Idx++;
+		}
+		pObj = pDerObj->GetObjRef();
+	}
+	return nullptr;
+}
+
+
+
+// Get or Create the Skin Modifier
+Modifier* GetOrCreateSkin(INode* node)
+{
+	Modifier* skinMod = GetSkin(node);
+	if (skinMod)
+		return skinMod;
+
+	Object* pObj = node->GetObjectRef();
+	IDerivedObject* dobj = nullptr;
+	if (pObj->SuperClassID() == GEN_DERIVOB_CLASS_ID)
+		dobj = static_cast<IDerivedObject*>(pObj);
+	else {
+		dobj = CreateDerivedObject(pObj);
+	}
+	//create a skin modifier and add it
+	skinMod = (Modifier*)CreateInstance(OSM_CLASS_ID, SKIN_CLASSID);
+	dobj->SetAFlag(A_LOCK_TARGET);
+	dobj->AddModifier(skinMod);
+	dobj->ClearAFlag(A_LOCK_TARGET);
+	node->SetObjectRef(dobj);
+	return skinMod;
+}
+
+
+void MAX_Yobj_Import::setMeshSkin(INode* node, YOBJReader& model, YukesSubObj& mObj) {
+
+	//create a skin modifier and add it
+	Modifier* skinMod = GetOrCreateSkin(node);
+	TriObject* triObject = GetTriObject(node->GetObjectRef());
+	Mesh& m = triObject->GetMesh();
+
+	if (ISkin* skin = (ISkin*)skinMod->GetInterface(I_SKIN)) {
+		ISkinImportData* iskinImport = (ISkinImportData*)skinMod->GetInterface(I_SKINIMPORTDATA);
+
+		// Set the num weights to 4.
+		int numBonesPerVertex = mObj.weightInfluence;
+		int numWeightsPerVertex = mObj.weightInfluence;
+
+		//v5+ dependency
+		IParamBlock2* params = skinMod->GetParamBlockByID(2/*advanced*/);
+		params->SetValue(numBonesPerVertex, 0, numWeightsPerVertex);
+
+		//v6+ dependency
+		BOOL ignore = TRUE;
+		params->SetValue(0xE/*ignoreBoneScale*/, 0, ignore);
+
+
+		// Create Bone List (Should only use affected)
+		Tab<INode*> bones;
+		for (size_t i = 0; i < mObj.weightedBones.size(); ++i) {
+
+			int wIndex = mObj.weightedBones[i];
+			MDLBoneOBJ bone = model.bones[wIndex];
+
+			INode* boneRef = GetCOREInterface()->GetINodeByName(
+				BinaryUtils::string_to_wchar(bone.name));
+
+			bones.Append(1, &boneRef);
+			iskinImport->AddBoneEx(boneRef, TRUE);
+
+		}
+
+		ObjectState os = node->EvalWorldState(0);
+
+
+		//Assign Weights
+		std::vector<float> bi = mObj.blendIndices;
+		std::vector<float> bw = mObj.blendWeights;
+
+		for (size_t i = 0; i < mObj.verticeCount; ++i) {
+
+			Tab<INode*> wBones;
+			Tab<float> weights;
+
+			for (int j = 0; j < 4; j++)
+			{
+				int boneIndex = bi[(i * 4) + j];
+				float boneWeight = bw[(i * 4) + j];
+				MDLBoneOBJ bone = model.bones[boneIndex];
+
+				INode* boneRef = GetCOREInterface()->GetINodeByName(BinaryUtils::string_to_wchar(bone.name));
+				wBones.Append(1, &boneRef);
+				weights.Append(1, &boneWeight);
+			}
+
+			BOOL add = iskinImport->AddWeights(node, i, wBones, weights);
+
+		}
+
+		node->EvalWorldState(0);
+
+	}
+
+}
 
