@@ -38,7 +38,7 @@
     <ClCompile>
       <WholeProgramOptimization>false</WholeProgramOptimization>
       <PreprocessorDefinitions>_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(MaxSdkInc);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\wauke\source\repos\MDLReader\MDLReader\3rdParty;C:\Users\wauke\source\repos\MDLReader\MDLReader;C:\Users\wauke\source\repos\YOBJ_Reader\YOBJ_Reader;$(MaxSdkInc);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level4</WarningLevel>
     </ClCompile>
     <Link>
@@ -58,6 +58,7 @@
     <ClInclude Include="3dsmaxsdk_preinclude.h" />
     <ClInclude Include="MAX_Yobj_Import.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="TriGeoObject.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MAX_Yobj_Import.rc" />
